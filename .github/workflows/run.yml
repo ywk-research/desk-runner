@@ -1,0 +1,79 @@
+name: run
+# 비공개 저장소(signals, desk-private)의 코드를 받아 실행하고 결과를 그 저장소에 커밋한다.
+# 이 저장소는 공개라서 실행 로그도 공개다. 명령 출력은 전부 파일로 보내고, 그 로그는 비공개 저장소의
+# runner-logs 브랜치에만 올린다. 아티팩트·캐시에 데이터를 넣지 않는다.
+#
+# 실행 예:
+#   gh api -X POST repos/ywk-research/desk-runner/actions/workflows/run.yml/dispatches \
+#     -f ref=main -f 'inputs[repo]=signals' -f 'inputs[ref]=<브랜치>' -f 'inputs[cmd]=python run.py prices --universe all'
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "대상 비공개 저장소"
+        type: choice
+        options: [signals, desk-private]
+        default: signals
+      ref:
+        description: "대상 브랜치 (결과도 이 브랜치에 커밋)"
+        required: true
+        default: main
+      cmd:
+        description: "저장소 루트에서 실행할 명령 (출력은 공개 로그에 찍히지 않음)"
+        required: true
+      add:
+        description: "커밋할 경로, 공백 구분. 비우면 커밋하지 않음"
+        default: data
+      message:
+        description: "커밋 메시지"
+        default: "runner 실행 결과"
+      timeout:
+        description: "제한 시간(분, 최대 350)"
+        default: "60"
+
+# 같은 저장소·브랜치에 결과를 쓰는 실행은 한 번에 하나만.
+concurrency:
+  group: run-${{ inputs.repo }}-${{ inputs.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.timeout) }}
+    env:
+      REPO: ywk-research/${{ inputs.repo }}
+      REF: ${{ inputs.ref }}
+      GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      LOG: /tmp/runner-run.log
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ywk-research/${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: w
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 실행
+        working-directory: w
+        env:
+          CMD: ${{ inputs.cmd }}
+        run: ../runner/scripts/quiet.sh bash -c "$CMD"
+      - name: 결과 커밋
+        if: ${{ inputs.add != '' }}
+        working-directory: w
+        env:
+          ADD: ${{ inputs.add }}
+          MSG: ${{ inputs.message }}
+        run: ../runner/scripts/push.sh
+      - name: 로그를 비공개 저장소로
+        if: ${{ always() }}
+        run: python3 runner/scripts/save_log.py

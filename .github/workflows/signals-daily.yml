@@ -1,0 +1,78 @@
+name: signals-daily
+# signals의 매일 업데이트(예전 signals/.github/workflows/update.yml)를 여기서 돌린다.
+# 수집(EDGAR) → 주가 → 점수 → 백테스트 → 리서치 요약 → signals main에 커밋.
+# 출력은 공개 로그에 찍지 않고 signals의 runner-logs 브랜치에 올린다.
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # 한국시간 화~토 07:30 (미국 장 마감·공시 이후)
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "signals 브랜치"
+        default: main
+      reextract:
+        description: "이미 처리한 10-K/10-Q도 다시 추출 (파서 수정 후)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: signals-daily
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      REPO: ywk-research/signals
+      REF: ${{ inputs.ref || 'main' }}
+      GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      SEC_REQUEST_GAP: "0.15"
+      REEXTRACT: ${{ inputs.reextract && '--reextract' || '' }}
+      LOG: /tmp/runner-run.log
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ywk-research/signals
+          ref: ${{ env.REF }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: w
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # SEC 공시 원문(공개 자료)만 캐시한다. 결과·주가는 캐시에 넣지 않는다.
+      - uses: actions/cache@v4
+        with:
+          path: w/.cache
+          key: edgar-docs-${{ github.run_id }}
+          restore-keys: edgar-docs-
+      - name: 수집·분석
+        working-directory: w
+        run: |
+          ../runner/scripts/quiet.sh bash -c '
+            set -e
+            for u in m7 airlines defense; do
+              TIMING_LOG=data/universes/$u/timing_pending.csv python run.py collect --universe $u $REEXTRACT || echo "collect $u 실패"
+            done
+            python -c "from sec import timing; timing.merge_pending()"
+            python run.py prices --universe all
+            python run.py scores --universe all
+            python run.py backtest --universe all
+            python run.py research --universe all
+          '
+      - name: 결과 커밋
+        working-directory: w
+        env:
+          ADD: data
+          MSG: "데이터 업데이트: SEC 공시 신호"
+        run: ../runner/scripts/push.sh
+      - name: 로그를 비공개 저장소로
+        if: ${{ always() }}
+        run: python3 runner/scripts/save_log.py
