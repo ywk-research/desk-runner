@@ -46,4 +46,4 @@ rc, _ = gh(f"repos/{repo}/contents/{path}", "-X", "PUT", input_json={
     "committer": {"name": "github-actions[bot]",
                   "email": "41898282+github-actions[bot]@users.noreply.github.com"},
 })
-print(f"로그 저장: {branch}/{path}" if rc == 0 else "로그 저장 실패")
+print(f"로그 저장: {branch} 브랜치 {path}" if rc == 0 else "로그 저장 실패")

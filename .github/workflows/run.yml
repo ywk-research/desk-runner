@@ -22,7 +22,7 @@ on:
         description: "저장소 루트에서 실행할 명령 (출력은 공개 로그에 찍히지 않음)"
         required: true
       add:
-        description: "커밋할 경로, 공백 구분. 비우면 커밋하지 않음"
+        description: "커밋할 경로, 공백 구분. -면 커밋하지 않음"
         default: data
       message:
         description: "커밋 메시지"
@@ -68,7 +68,7 @@ jobs:
           CMD: ${{ inputs.cmd }}
         run: ../runner/scripts/quiet.sh bash -c "$CMD"
       - name: 결과 커밋
-        if: ${{ inputs.add != '' }}
+        if: ${{ inputs.add != '-' && inputs.add != '' }}
         working-directory: w
         env:
           ADD: ${{ inputs.add }}
